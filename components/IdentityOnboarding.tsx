@@ -31,10 +31,11 @@ export const IdentityOnboarding = ({ onComplete }: { onComplete: (name: string, 
           className="space-y-8"
         >
           <div className="relative w-full aspect-square max-w-[400px] mx-auto rounded-[3rem] overflow-hidden border-4 border-white/10 shadow-[0_0_80px_rgba(234,179,8,0.15)]">
-            <Image 
-              src="/avatars/wags.png" 
-              alt="Mike Wags Wagner" 
-              fill 
+            <Image
+              src="/avatars/wags.png"
+              alt="Mike Wags Wagner"
+              fill
+              sizes="(max-width: 1024px) 100vw, 400px"
               className="object-cover"
             />
             <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/80 to-transparent flex items-end p-8">

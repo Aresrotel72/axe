@@ -495,10 +495,11 @@ export default function Home() {
               >
                 <div className="shrink-0">
                    <div className="relative w-14 h-14 rounded-2xl overflow-hidden border-2 border-white/10 group-hover:border-[#22c55e]/50 transition-all shadow-xl">
-                      <Image 
-                        src={msg.avatar || "/avatars/axe.png"} 
-                        alt={msg.role} 
-                        fill 
+                      <Image
+                        src={msg.avatar || "/avatars/axe.png"}
+                        alt={msg.role}
+                        fill
+                        sizes="56px"
                         className="object-cover"
                       />
                       <div className={`absolute bottom-0 left-0 right-0 h-1 ${
