@@ -30,12 +30,15 @@ import {
   VolumeX,
   Mic,
   MicOff,
-  HelpCircle
+  HelpCircle,
+  Settings
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { generateDualIntel, AgentResponse, AgentRole } from "@/lib/agents";
 import { StartupSequence } from "@/components/StartupSequence";
 import { IdentityOnboarding } from "@/components/IdentityOnboarding";
+import { AlphaDetailPanel } from "@/components/AlphaDetailPanel";
+import { VoiceSettingsModal } from "@/components/VoiceSettingsModal";
 
 // --- COMPONENTS ---
 
@@ -121,6 +124,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<AgentResponse | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isStarted, setIsStarted] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [user, setUser] = useState({ name: "", title: "" });
@@ -129,13 +133,17 @@ export default function Home() {
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [prices, setPrices] = useState({ btc: 65421.12, eth: 3241.84, sol: 142.12 });
+  const [isElevenLabsActive, setIsElevenLabsActive] = useState(false);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     // Check for user
     const savedName = localStorage.getItem("axe_user_name");
     const savedTitle = localStorage.getItem("axe_user_title");
+    setIsElevenLabsActive(localStorage.getItem("eleven_labs_active") === "true");
+
     if (!savedName) {
       setNeedsOnboarding(true);
     } else {
@@ -154,40 +162,74 @@ export default function Home() {
 
   // --- AUDIO LOGIC ---
 
-  const speak = (text: string, role: AgentRole | "WAGS") => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    
-    // Stop any ongoing speech
-    window.speechSynthesis.cancel();
+  const speak = async (text: string, role: AgentRole | "WAGS") => {
+    if (typeof window === "undefined") return;
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    // Character profiles
-    switch(role) {
-      case "AXE": 
-        utterance.pitch = 0.8; 
-        utterance.rate = 0.95; 
-        break;
-      case "TAYLOR": 
-        utterance.pitch = 1.1; 
-        utterance.rate = 1.25; 
-        break;
-      case "WENDY": 
-        utterance.pitch = 1.0; 
-        utterance.rate = 1.0; 
-        break;
-      case "WAGS":
-        utterance.pitch = 1.2;
-        utterance.rate = 1.3;
-        break;
+    // Check for ElevenLabs
+    const active = localStorage.getItem("eleven_labs_active") === "true";
+    const apiKey = localStorage.getItem("eleven_labs_api_key");
+    const axeVoiceId = localStorage.getItem("eleven_labs_axe_voice_id");
+
+    if (active && apiKey && role === "AXE") {
+      try {
+        const response = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+             text: text,
+             voiceId: axeVoiceId || "pNInz6obpg8nEmeW44wi",
+             apiKey: apiKey
+          })
+        });
+
+        if (response.ok) {
+           const blob = await response.blob();
+           const url = URL.createObjectURL(blob);
+           const audio = new Audio(url);
+           audio.play();
+           return;
+        }
+      } catch (e) {
+        console.error("ElevenLabs failed, falling back to browser TTS", e);
+      }
     }
 
-    // Assign Russian voice if available
-    const voices = window.speechSynthesis.getVoices();
-    const ruVoice = voices.find(v => v.lang.includes("ru"));
-    if (ruVoice) utterance.voice = ruVoice;
+    // Default Browser TTS Fallback
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const chunks = text.split(/[.!?]+/).filter(t => t.trim().length > 0);
+    let currentChunk = 0;
 
-    window.speechSynthesis.speak(utterance);
+    const speakNextChunk = () => {
+      if (currentChunk >= chunks.length) return;
+      const utterance = new SpeechSynthesisUtterance(chunks[currentChunk]);
+      const voices = window.speechSynthesis.getVoices();
+      const ruVoices = voices.filter(v => v.lang.includes("ru"));
+      const maleVoices = ruVoices.filter(v => v.name.toLowerCase().includes("male") || v.name.includes("Pavel") || v.name.includes("Yuri"));
+      const femaleVoices = ruVoices.filter(v => v.name.toLowerCase().includes("female") || v.name.includes("Milena") || v.name.includes("Katya") || v.name.includes("Irina"));
+
+      switch(role) {
+        case "AXE": 
+          utterance.pitch = 0.75; utterance.rate = 0.85; utterance.voice = maleVoices[0] || ruVoices[0];
+          break;
+        case "TAYLOR": 
+          utterance.pitch = 1.05; utterance.rate = 1.35; utterance.voice = femaleVoices[0] || ruVoices[0];
+          break;
+        case "WENDY": 
+          utterance.pitch = 0.95; utterance.rate = 0.8; utterance.voice = femaleVoices[1] || femaleVoices[0] || ruVoices[0];
+          break;
+        case "WAGS":
+          utterance.pitch = 1.25; utterance.rate = 1.15; utterance.voice = maleVoices[1] || maleVoices[0] || ruVoices[0];
+          break;
+      }
+
+      utterance.onend = () => {
+        currentChunk++;
+        setTimeout(speakNextChunk, role === "WENDY" ? 600 : 300);
+      };
+      window.speechSynthesis.speak(utterance);
+    };
+    speakNextChunk();
   };
 
   const startListening = () => {
@@ -259,7 +301,7 @@ export default function Home() {
   ]);
 
   const showWagsTutorial = () => {
-    speak("Слушай меня внимательно. Перед тобой — не просто терминал. Это твоя личная армия. Слева — наши радары на иксы и системные риски. По центру — поле битвы. Если хочешь, чтобы Акс тебя услышал — просто нажми на микрофон. И не забудь включить звук, если хочешь услышать, как пахнет прибыль.", "WAGS");
+    speak("Слушай меня внимательно. Перед тобой — не просто терминал. Это твоя личная армия. Слева — наши радары на иксы и системные риски. По центру — поле битвы. Если хочешь, чтобы Акс тебя услышал — просто нажми на микрофон. И не забудь заглянуть в настройки голоса, господин Амбассадор.", "WAGS");
   };
 
   if (needsOnboarding) {
@@ -283,6 +325,13 @@ export default function Home() {
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
         message={selectedMessage} 
+      />
+      <VoiceSettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => {
+          setIsSettingsOpen(false);
+          setIsElevenLabsActive(localStorage.getItem("eleven_labs_active") === "true");
+        }} 
       />
 
       {/* HEADER / LIVE TICKER */}
@@ -313,16 +362,25 @@ export default function Home() {
             </div>
           </div>
           
-          <div className="flex items-center gap-6 shrink-0">
-             <button 
-                onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-                className={`flex items-center gap-2 px-3 py-1 rounded-lg border-2 transition-all ${
-                    isVoiceEnabled ? "bg-[#22c55e]/10 border-[#22c55e]/40 text-[#22c55e]" : "bg-white/5 border-white/5 text-gray-500"
-                }`}
-             >
-                {isVoiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
-                <span className="text-[9px] font-black uppercase tracking-widest sm:block hidden">Voice Mode: {isVoiceEnabled ? "ON" : "OFF"}</span>
-             </button>
+          <div className="flex items-center gap-4 shrink-0">
+             <div className="flex items-center bg-white/5 rounded-xl p-1 border border-white/5">
+                <button 
+                    onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all ${
+                        isVoiceEnabled ? "bg-[#22c55e]/10 text-[#22c55e]" : "text-gray-500"
+                    }`}
+                >
+                    {isVoiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                </button>
+                <button 
+                    onClick={() => setIsSettingsOpen(true)}
+                    className={`p-1.5 rounded-lg transition-all ${
+                        isElevenLabsActive ? "text-[#EAB308] hover:bg-[#EAB308]/10" : "text-gray-600 hover:text-white"
+                    }`}
+                >
+                    <Settings size={16} />
+                </button>
+             </div>
              
              <button 
                 onClick={showWagsTutorial}
@@ -375,34 +433,7 @@ export default function Home() {
             </div>
           </motion.section>
 
-          <section className="glass-panel p-8 rounded-[2rem] bg-indigo-500/[0.03] group relative overflow-hidden">
-            <h2 className="text-[10px] text-gray-400 mb-6 flex items-center gap-3 uppercase tracking-[0.4em] font-black">
-              <Skull size={16} className="text-indigo-400" /> 10x Alpha Radar
-            </h2>
-            <div className="p-4 bg-white/[0.03] border border-white/5 rounded-2xl group hover:border-[#EAB308]/40 transition-all cursor-pointer">
-               <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center gap-3">
-                     <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center">
-                        <Flame size={20} className="text-indigo-400" />
-                     </div>
-                     <div>
-                        <div className="text-sm font-black text-white">RENDER (RNDR)</div>
-                        <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Target: $125.00</div>
-                     </div>
-                  </div>
-                  <div className="text-right">
-                     <div className="text-xs font-black text-[#22c55e]">+840%</div>
-                     <div className="text-[9px] text-gray-600 uppercase font-black">Potential</div>
-                  </div>
-               </div>
-               <div className="text-[11px] text-gray-400 leading-relaxed italic mb-4">
-                  "Math probability: 54.1%. Market maker accumulation detected. Entry zone confirmed by Axe."
-               </div>
-               <button className="w-full py-2 bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black text-indigo-400 uppercase tracking-widest hover:bg-indigo-500/20 transition-all">
-                  Analyze Protocol
-               </button>
-            </div>
-          </section>
+          <AlphaDetailPanel symbol="RENDER" potential="+14.2x" />
 
           <section className="glass-panel p-8 rounded-[2rem] bg-amber-500/[0.03]">
              <h2 className="text-[10px] text-amber-600 mb-6 flex items-center gap-3 uppercase tracking-[0.4em] font-black">
@@ -447,7 +478,7 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-3 text-[10px] font-black uppercase text-gray-500">
                <Volume2 size={14} className={isVoiceEnabled ? "text-[#22c55e] animate-pulse" : "text-gray-600"} /> 
-               {isVoiceEnabled ? "LIVE AUDIO" : "AUDIO MUTED"}
+               {isVoiceEnabled ? (isElevenLabsActive ? "ELITE AI AUDIO" : "LIVE AUDIO") : "AUDIO MUTED"}
             </div>
           </div>
 
@@ -579,7 +610,7 @@ export default function Home() {
                 <Activity size={12} className="text-[#22c55e]" /> Deep_Logic: Active
               </span>
               <span className="flex items-center gap-3">
-                <ShieldCheck size={12} className="text-[#EAB308]" /> Axe_Secured_VOICE
+                <ShieldCheck size={12} className="text-[#EAB308]" /> Axe_Secured_VOICE_SYNC
               </span>
             </div>
           </div>
